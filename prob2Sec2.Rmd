@@ -1,0 +1,132 @@
+---
+title: "Prob #2"
+author: Cong Yang
+date: Janurary 16th, 2017
+output: github_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+First, load all the required libraries
+```{r library}
+library(rmarkdown)
+library(sarsop)
+library(MDPtoolbox)
+```
+Second, set the basic model parameter. Now we only have 100 prossible states 
+since we change the observation martrix to 100X100X100. Therefore, I do not 
+use the same data as the paper. Instead, I set the maximum wolf population 
+size to 99 and minimun wolf population to 0, so that we have 100 states in total.
+```{r parameter}
+Nmax<-99
+Nmin<-0
+K=Nmax
+lambda <- 1.25
+beta <- 0.98
+epsilon <- 1*10^-10
+discount <- 0.9
+```
+Third, the control variable At is the harvest rate Ht, 
+a discrete variable ranging from 0% to 100% with an increment of 1/(K + 1) 
+therefore allowing as many possible actions as there are number of states.
+We are given that the probability of taking a successful action is p=0.9;
+therefore, the probability of the action not working (failed action) is (1-p)=0.9.
+Also, becasue I change the number of state, I re-define the alpha function 
+('alpha = 1' if '50 <= Nt+1 <= 99', otherwise, 'alpha = 0').
+```{r body}
+H = matrix(0,nrow=1,ncol=1)
+for (i in 1:K){
+  H[i+1]=1/(K+1)+H[i]
+}
+
+AlphaFunction  <- function(Ntplus){
+  if (Ntplus<50 | Ntplus>99)
+  {
+    res <- 0
+  }
+  else{
+    res <- 1
+  }
+}
+
+NtFunction <- function (Nt,Ht,lambda)
+{
+  res <- lambda * Nt * (1 - Ht)
+}
+
+UtilityFunction <- function (Nt,Ht,alpha)
+{
+  res <- Nt * (1 - Ht) * alpha
+}
+
+utility <- matrix(0, nrow = K+1, ncol = length(H)) 
+states=0:K
+transition <- array(0, dim = c(K+1, K+1, length(H)))
+observation<-transition
+Ntplus_storage<- matrix(0, nrow = K+1, ncol = length(H)) 
+for (k in 0:K) {
+  
+  for (i in 1:length(H)) {
+    
+    Ntplus <- NtFunction(k, H[i],lambda)
+    
+    Alpha <- AlphaFunction(Ntplus)
+    
+    Ntplus <- min(round(Ntplus), K)
+    
+    utility[k+1,i] <- UtilityFunction(Ntplus,H[i],Alpha)
+    
+    index <- which(states == Ntplus)
+    
+    transition[k+1,index,i] <- 1
+    
+    observation[k+1,index,i] <-0.9
+    
+    observation[k+1,k+1,i]<-observation[k+1,k+1,i] + 0.1
+  }
+}
+```
+Fourth, use the built-in function to find the optimal solution (if converge then the while loop stop)
+```{r Sarsop}
+converge <- 0
+preci <- 1
+tic <- 0
+while(converge == 0)
+{
+  if (tic == 0)
+  {
+    result <- sarsop(transition, observation, utility, discount, precision = preci)
+    policy_previous <- compute_policy(result, transition, observation, utility)
+    tic = tic + 1
+  }
+  else
+  {
+    preci <- preci/10
+    result <- sarsop(transition, observation, utility, discount, precision = preci)
+    policy_current <- compute_policy(result, transition, observation, utility)
+    if (mean(abs(policy_current$policy-policy_previous$policy)) <= 1/K)
+    {
+      converge <-1
+      policy <- policy_current
+    }
+    else
+    {
+      policy_previous <- policy_current
+    }
+  }
+}
+```
+Fifth, plot the result
+```{r Plot}
+policy_val <- H[policy[,1,]]
+print(policy)
+plot(states, policy_val, xlab="Population size", ylab="harvest rate")
+```
+
+Sixth, original solution without measurement uncertainty (using MDPToolbox) to the same figure for comparison purposes.
+```{r original}
+pol_ite<-mdp_policy_iteration_modified(transition, utility, discount, epsilon)
+policy_pol<-matrix(0,nrow=K+1,ncol=1)
+policy_pol<-H[pol_ite$policy]
+plot(states, policy_pol, xlab="Population size", ylab="harvest rate (Pol_Ite)")
+```
